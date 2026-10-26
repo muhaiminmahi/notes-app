@@ -1,5 +1,5 @@
 import sqlite3
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -40,3 +40,18 @@ class NoteIn(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "Hello Mahi"}
+
+
+@app.post("/notes", status_code=status.HTTP_201_CREATED)
+def create_note(note: NoteIn):
+    conn = get_connection()
+    cursor = conn.execute(
+        "INSERT INTO notes (title, content) VALUES (?, ?)",
+        (note.title, note.content),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM notes WHERE id = ?", (cursor.lastrowid,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
