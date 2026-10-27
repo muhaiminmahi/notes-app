@@ -1,3 +1,5 @@
+import hashlib
+import os
 import sqlite3
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
@@ -25,6 +27,17 @@ def init_db():
         )
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -35,7 +48,15 @@ class NoteIn(BaseModel):
     title: str
     content: str
 
+class UserIn(BaseModel):
+    username: str
+    password: str
 
+
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+    return salt.hex() + ":" + digest.hex()
 
 @app.get("/")
 async def root():
@@ -106,3 +127,21 @@ def delete_note(note_id: int):
     conn.close()
     if deleted == 0:
         raise HTTPException(status_code=404, detail="Note not found")
+
+
+
+@app.post("/register", status_code=status.HTTP_201_CREATED)
+def register(user: UserIn):
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (user.username, hash_password(user.password)),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Username already taken")
+    user_id = cursor.lastrowid
+    conn.close()
+    return {"id": user_id, "username": user.username}
