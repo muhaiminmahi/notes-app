@@ -3,7 +3,8 @@ import secrets
 import hashlib
 import os
 import sqlite3
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -25,6 +26,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             content TEXT NOT NULL,
+	    user_id INTEGER NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -78,6 +80,22 @@ def verify_password(password: str, stored: str) -> bool:
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
     return hmac.compare_digest(digest.hex(), digest_hex)
 
+bearer = HTTPBearer()
+
+
+def get_current_user(
+    creds: HTTPAuthorizationCredentials = Depends(bearer),
+) -> int:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT user_id FROM sessions WHERE token = ?", (creds.credentials,)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
+    return row["user_id"]
+
+
 
 @app.get("/")
 async def root():
@@ -85,11 +103,11 @@ async def root():
 
 
 @app.post("/notes", status_code=status.HTTP_201_CREATED)
-def create_note(note: NoteIn):
+def create_note(note: NoteIn, user_id: int = Depends(get_current_user)):
     conn = get_connection()
     cursor = conn.execute(
-        "INSERT INTO notes (title, content) VALUES (?, ?)",
-        (note.title, note.content),
+        "INSERT INTO notes (title, content, user_id) VALUES (?, ?, ?)",
+        (note.title, note.content, user_id),
     )
     conn.commit()
     row = conn.execute(
@@ -99,20 +117,21 @@ def create_note(note: NoteIn):
     return dict(row)
 
 
-
 @app.get("/notes")
-def list_notes():
+def list_notes(user_id: int = Depends(get_current_user)):
     conn = get_connection()
-    rows = conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM notes WHERE user_id = ? ORDER BY id", (user_id,)
+    ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
 @app.get("/notes/{note_id}")
-def get_note(note_id: int):
+def get_note(note_id: int, user_id: int = Depends(get_current_user)):
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM notes WHERE id = ?", (note_id,)
+        "SELECT * FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id)
     ).fetchone()
     conn.close()
     if row is None:
@@ -120,18 +139,19 @@ def get_note(note_id: int):
     return dict(row)
 
 
-
 @app.put("/notes/{note_id}")
-def update_note(note_id: int, note: NoteIn):
+def update_note(
+    note_id: int, note: NoteIn, user_id: int = Depends(get_current_user)
+):
     conn = get_connection()
     cursor = conn.execute(
-        "UPDATE notes SET title = ?, content = ? WHERE id = ?",
-        (note.title, note.content, note_id),
+        "UPDATE notes SET title = ?, content = ? WHERE id = ? AND user_id = ?",
+        (note.title, note.content, note_id, user_id),
     )
     conn.commit()
     changed = cursor.rowcount
     row = conn.execute(
-        "SELECT * FROM notes WHERE id = ?", (note_id,)
+        "SELECT * FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id)
     ).fetchone()
     conn.close()
     if changed == 0:
@@ -140,15 +160,16 @@ def update_note(note_id: int, note: NoteIn):
 
 
 @app.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_note(note_id: int):
+def delete_note(note_id: int, user_id: int = Depends(get_current_user)):
     conn = get_connection()
-    cursor = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    cursor = conn.execute(
+        "DELETE FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id)
+    )
     conn.commit()
     deleted = cursor.rowcount
     conn.close()
     if deleted == 0:
         raise HTTPException(status_code=404, detail="Note not found")
-
 
 
 @app.post("/register", status_code=status.HTTP_201_CREATED)
