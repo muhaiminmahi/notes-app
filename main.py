@@ -1,5 +1,5 @@
 import sqlite3
-from fastapi import FastAPI, status
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -54,4 +54,25 @@ def create_note(note: NoteIn):
         "SELECT * FROM notes WHERE id = ?", (cursor.lastrowid,)
     ).fetchone()
     conn.close()
+    return dict(row)
+
+
+
+@app.get("/notes")
+def list_notes():
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@app.get("/notes/{note_id}")
+def get_note(note_id: int):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM notes WHERE id = ?", (note_id,)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Note not found")
     return dict(row)
