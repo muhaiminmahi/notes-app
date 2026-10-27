@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-DB_PATH = "notes.db"
+DB_PATH = os.environ.get("DB_PATH", "notes.db")
 
 
 def get_connection():
