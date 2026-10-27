@@ -76,3 +76,33 @@ def get_note(note_id: int):
     if row is None:
         raise HTTPException(status_code=404, detail="Note not found")
     return dict(row)
+
+
+
+@app.put("/notes/{note_id}")
+def update_note(note_id: int, note: NoteIn):
+    conn = get_connection()
+    cursor = conn.execute(
+        "UPDATE notes SET title = ?, content = ? WHERE id = ?",
+        (note.title, note.content, note_id),
+    )
+    conn.commit()
+    changed = cursor.rowcount
+    row = conn.execute(
+        "SELECT * FROM notes WHERE id = ?", (note_id,)
+    ).fetchone()
+    conn.close()
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return dict(row)
+
+
+@app.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_note(note_id: int):
+    conn = get_connection()
+    cursor = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Note not found")
