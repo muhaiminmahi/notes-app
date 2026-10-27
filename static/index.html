@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notes App</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+    input, textarea { display: block; width: 100%; box-sizing: border-box; margin: 0.5rem 0; padding: 0.5rem; }
+    button { margin: 0.25rem 0.5rem 0.25rem 0; padding: 0.5rem 1rem; cursor: pointer; }
+    .note { border: 1px solid #ccc; border-radius: 6px; padding: 0.75rem; margin: 0.75rem 0; }
+    .error { color: #b00020; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Notes</h1>
+  <p id="message" class="error"></p>
+
+  <section id="auth">
+    <input id="username" placeholder="Username">
+    <input id="password" type="password" placeholder="Password">
+    <button id="login-btn">Log in</button>
+    <button id="register-btn">Register</button>
+  </section>
+
+  <section id="app" class="hidden">
+    <button id="logout-btn">Log out</button>
+    <h2>New note</h2>
+    <input id="title" placeholder="Title">
+    <textarea id="content" placeholder="Content"></textarea>
+    <button id="add-btn">Add note</button>
+    <h2>Your notes</h2>
+    <div id="notes"></div>
+  </section>
+
+  <script>
+    let token = sessionStorage.getItem("token");
+
+    function $(id) { return document.getElementById(id); }
+    function showMessage(text) { $("message").textContent = text; }
+
+    async function api(path, options = {}) {
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const resp = await fetch(path, { ...options, headers });
+      if (resp.status === 401 && token) {
+        logout();
+        throw new Error("Please log in again");
+      }
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(typeof data.detail === "string" ? data.detail : "Request failed");
+      }
+      return resp.status === 204 ? null : resp.json();
+    }
+
+    function render() {
+      const loggedIn = Boolean(token);
+      $("auth").classList.toggle("hidden", loggedIn);
+      $("app").classList.toggle("hidden", !loggedIn);
+      if (loggedIn) loadNotes();
+    }
+
+    function logout() {
+      token = null;
+      sessionStorage.removeItem("token");
+      render();
+    }
+
+    async function authenticate(register) {
+      showMessage("");
+      try {
+        const body = JSON.stringify({
+          username: $("username").value,
+          password: $("password").value,
+        });
+        if (register) await api("/register", { method: "POST", body });
+        const data = await api("/login", { method: "POST", body });
+        token = data.access_token;
+        sessionStorage.setItem("token", token);
+        $("password").value = "";
+        render();
+      } catch (err) {
+        showMessage(err.message);
+      }
+    }
+
+    async function loadNotes() {
+      try {
+        const notes = await api("/notes");
+        const box = $("notes");
+        box.replaceChildren();
+        notes.forEach((note) => {
+          const div = document.createElement("div");
+          div.className = "note";
+          const title = document.createElement("strong");
+          title.textContent = note.title;
+          const text = document.createElement("p");
+          text.textContent = note.content;
+          const del = document.createElement("button");
+          del.textContent = "Delete";
+          del.addEventListener("click", () => deleteNote(note.id));
+          div.append(title, text, del);
+          box.appendChild(div);
+        });
+      } catch (err) {
+        showMessage(err.message);
+      }
+    }
+
+    async function addNote() {
+      showMessage("");
+      try {
+        await api("/notes", {
+          method: "POST",
+          body: JSON.stringify({
+            title: $("title").value,
+            content: $("content").value,
+          }),
+        });
+        $("title").value = "";
+        $("content").value = "";
+        loadNotes();
+      } catch (err) {
+        showMessage(err.message);
+      }
+    }
+
+    async function deleteNote(id) {
+      try {
+        await api("/notes/" + id, { method: "DELETE" });
+        loadNotes();
+      } catch (err) {
+        showMessage(err.message);
+      }
+    }
+
+    $("login-btn").addEventListener("click", () => authenticate(false));
+    $("register-btn").addEventListener("click", () => authenticate(true));
+    $("logout-btn").addEventListener("click", logout);
+    $("add-btn").addEventListener("click", addNote);
+    render();
+  </script>
+</body>
+</html>

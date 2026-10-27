@@ -1,3 +1,4 @@
+from fastapi.staticfiles import StaticFiles
 import hmac
 import secrets
 import hashlib
@@ -206,3 +207,4 @@ def login(user: UserIn):
     conn.close()
     return {"access_token": token, "token_type": "bearer"}
 
+app.mount("/app", StaticFiles(directory="static", html=True), name="static")
