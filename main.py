@@ -1,3 +1,5 @@
+import hmac
+import secrets
 import hashlib
 import os
 import sqlite3
@@ -38,6 +40,18 @@ def init_db():
         """
     )
 
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
     conn.commit()
     conn.close()
 
@@ -57,6 +71,13 @@ def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
     return salt.hex() + ":" + digest.hex()
+
+def verify_password(password: str, stored: str) -> bool:
+    salt_hex, digest_hex = stored.split(":")
+    salt = bytes.fromhex(salt_hex)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+    return hmac.compare_digest(digest.hex(), digest_hex)
+
 
 @app.get("/")
 async def root():
@@ -145,3 +166,22 @@ def register(user: UserIn):
     user_id = cursor.lastrowid
     conn.close()
     return {"id": user_id, "username": user.username}
+
+
+@app.post("/login")
+def login(user: UserIn):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM users WHERE username = ?", (user.username,)
+    ).fetchone()
+    if row is None or not verify_password(user.password, row["password_hash"]):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, row["id"])
+    )
+    conn.commit()
+    conn.close()
+    return {"access_token": token, "token_type": "bearer"}
+
